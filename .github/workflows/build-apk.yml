@@ -1,0 +1,89 @@
+
+name: Compiler Mode Ambiance APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Decompresser et compiler le projet Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer les fichiers du depot
+        uses: actions/checkout@v4
+
+      - name: Installer Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Installer Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '7.6.4'
+
+      - name: Decompresser le projet ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE=$(find "$GITHUB_WORKSPACE" \
+            -maxdepth 1 -type f -iname '*.zip' \
+            -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERREUR : aucun fichier ZIP trouve a la racine du depot."
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/build-source"
+          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/build-source"
+
+          PROJECT_DIR=$(dirname "$(find \
+            "$GITHUB_WORKSPACE/build-source" \
+            -type f -name settings.gradle \
+            -print -quit)")
+
+          if [ "$PROJECT_DIR" = \
+            "$(dirname "$GITHUB_WORKSPACE/build-source/NOT_FOUND")" ] \
+            || [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
+            echo "ERREUR : projet Android Gradle introuvable ou incomplet."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Projet trouve : $PROJECT_DIR"
+
+      - name: Compiler l'APK
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          gradle --no-daemon assembleDebug
+
+          APK=$(find "$PROJECT_DIR/app/build/outputs/apk/debug" \
+            -type f -name '*.apk' -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERREUR : aucun APK genere."
+            exit 1
+          fi
+
+          cp "$APK" "$GITHUB_WORKSPACE/Mode-Ambiance.apk"
+
+      - name: Rendre l'APK telechargeable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mode-Ambiance-APK
+          path: Mode-Ambiance.apk
+          if-no-files-found: error
+          retention-days: 14
